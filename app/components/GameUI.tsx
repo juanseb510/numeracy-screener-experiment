@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import FractionPair from '@/app/components/FractionPair';
+import ComparisonPair from '@/app/components/ComparisonPair';
+import { generateComparison, ComparisonType } from '@/utils/comparisonGenerator';
 import { supabase } from '@/lib/supabase';
 
 export default function GameUI() {
@@ -16,123 +17,145 @@ export default function GameUI() {
   const [round, setRound] = useState(1);
   const [timeLeft, setTimeLeft] = useState(ROUND_TIME);
   const [gameOver, setGameOver] = useState(false);
+
   const [username, setUsername] = useState<string | null>(null);
-  const [playerId, setPlayerId] = useState<number | null>(null);
+  const [uid, setUid] = useState<number | null>(null);
 
-  // ✅ Load username from localStorage
+  const [comparison, setComparison] = useState(() => generateComparison());
+  const [wrongQuestions, setWrongQuestions] = useState<ComparisonType[]>([]);
+  const [sid, setSid] = useState<number | null>(null); // score id
+
+  // Load username
   useEffect(() => {
-    const storedUsername = localStorage.getItem('username');
-    if (!storedUsername) {
-      router.push('/login');
-      return;
+    const u = localStorage.getItem('username');
+    if (!u) router.push('/login');
+    else {
+      setUsername(u);
+      setMounted(true);
     }
-    setUsername(storedUsername);
-    setMounted(true);
-  }, [router]);
+  }, []);
 
-  // ✅ Get player ID from Supabase (based on username)
+  // Fetch UID from Users table
   useEffect(() => {
-    const fetchPlayerId = async () => {
-      if (!username) return;
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id')
+    if (!username) return;
+
+    const load = async () => {
+      const { data } = await supabase
+        .from('users')
+        .select('uid')
         .eq('username', username)
         .single();
 
-      if (error) {
-        console.error('❌ Error fetching player ID:', error.message);
-      } else {
-        setPlayerId(data.id);
-      }
+      if (data) setUid(data.uid);
     };
-    fetchPlayerId();
+
+    load();
   }, [username]);
 
-  // --- timer logic ---
+  // Timer logic
   useEffect(() => {
     if (!mounted || gameOver) return;
+
     if (round > TOTAL_ROUNDS) {
       setGameOver(true);
       return;
     }
 
     setTimeLeft(ROUND_TIME);
-    const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
-    return () => clearInterval(timer);
-  }, [mounted, round]);
+    const t = setInterval(() => setTimeLeft((t) => t - 1), 1000);
+    return () => clearInterval(t);
+  }, [round]);
 
   useEffect(() => {
-    if (timeLeft === 0) setRound((r) => r + 1);
+    if (timeLeft === 0) {
+      setWrongQuestions((prev) => [...prev, comparison.type]);
+      setRound((r) => r + 1);
+      setComparison(generateComparison());
+    }
   }, [timeLeft]);
 
-  const handleChoice = (side: 'left' | 'right', isCorrect: boolean) => {
-    if (isCorrect) setScore((s) => s + 1);
+  const handleChoice = (side: 'left' | 'right', correct: boolean) => {
+    if (!correct) {
+      setWrongQuestions((prev) => [...prev, comparison.type]);
+    } else {
+      setScore((s) => s + 1);
+    }
+
     setRound((r) => r + 1);
+    setComparison(generateComparison());
   };
 
-  // ✅ Save score using player ID
+  // Save score and wrong questions
   useEffect(() => {
-    const saveScore = async () => {
-      if (gameOver && playerId !== null) {
-        const { error } = await supabase
-          .from('scores')
-          .insert([{ id: playerId, high_score: score }]);
+    if (!gameOver || uid === null) return;
 
-        if (error)
-          console.error('❌ Error saving score:', error.message);
-        else console.log(`✅ Score saved for player ${playerId}`);
+    const save = async () => {
+      // 1️⃣ Insert score → get sid
+      const { data: scoreRow } = await supabase
+        .from('scores')
+        .insert([{ uid, score_value: score }])
+        .select('sid')
+        .single();
+
+      if (!scoreRow) return;
+
+      const newSid = scoreRow.sid;
+      setSid(newSid);
+
+      // 2️⃣ Insert wrong questions
+      if (wrongQuestions.length > 0) {
+        const inserts = wrongQuestions.map((type) => ({
+          sid: newSid,
+          type,
+        }));
+
+        await supabase.from('questions_wrong').insert(inserts);
       }
     };
-    saveScore();
-  }, [gameOver, playerId, score]);
+
+    save();
+  }, [gameOver]);
 
   if (!mounted)
-    return (
-      <div className="flex items-center justify-center min-h-screen text-xl text-gray-500">
-        Loading game...
-      </div>
-    );
+    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
 
   if (gameOver)
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen text-center gap-6">
+      <div className="flex flex-col items-center justify-center min-h-screen gap-6">
         <h1 className="text-4xl font-bold">🏁 Game Over!</h1>
-        <p className="text-2xl">
-          Final Score:{' '}
-          <span className="font-semibold text-blue-600">{score}</span> / {TOTAL_ROUNDS}
-        </p>
+        <p className="text-2xl">Final Score: {score} / {TOTAL_ROUNDS}</p>
+
         <button
-          className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="px-5 py-2 bg-blue-600 text-white rounded"
           onClick={() => {
             setScore(0);
             setRound(1);
+            setWrongQuestions([]);
             setGameOver(false);
-            setTimeLeft(ROUND_TIME);
+            setComparison(generateComparison());
           }}
         >
           Play Again
         </button>
-        <Link href="/" className="text-blue-500 hover:underline mt-4">
+
+        <Link href="/" className="text-blue-500 hover:underline">
           Back to Home
         </Link>
       </div>
     );
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen text-center gap-6">
-      <h1 className="text-4xl font-bold">Fraction Challenge</h1>
-      <p className="text-gray-700 text-lg">
-        Welcome, <span className="font-semibold">{username}</span>!
-      </p>
-      <p className="text-gray-700 text-lg">
-        Round {round} / {TOTAL_ROUNDS} | Score: {score}
-      </p>
-      <p className="text-xl font-semibold text-blue-600">Time Left: {timeLeft}s</p>
-      <FractionPair onChoice={handleChoice} />
-      <p className="text-sm text-gray-500 mt-4 ">
-        Press ← or → to choose which fraction is greater
-      </p>
+    <div className="flex flex-col items-center justify-center min-h-screen gap-6">
+      <h1 className="text-4xl font-bold">Comparison Challenge</h1>
+      <p className="text-lg">Welcome, {username}</p>
+      <p className="text-lg">Round {round} / {TOTAL_ROUNDS} | Score: {score}</p>
+      <p className="text-xl text-blue-600">Time Left: {timeLeft}s</p>
+
+      <ComparisonPair
+        left={comparison.left}
+        right={comparison.right}
+        onChoice={handleChoice}
+      />
     </div>
   );
 }

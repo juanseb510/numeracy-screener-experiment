@@ -4,8 +4,11 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 import bcrypt from 'bcryptjs';
+import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
+  const router = useRouter();
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -19,56 +22,68 @@ export default function LoginPage() {
     }
 
     try {
-      // Check if the username already exists
-      const { data: existingUser, error: selectError } = await supabase
-        .from('profiles')
-        .select('username, password')
+      // 1️⃣ Look up user in "users"
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .select('uid, username, password_hash')
         .eq('username', username)
         .single();
 
-      if (selectError && selectError.code !== 'PGRST116') {
-        console.error('Select error:', selectError.message);
-        setMessage('Database error. Please try again.');
+      // Username not found
+      if (userError || !user) {
+        console.log("USER LOOKUP ERROR:", userError);
+        setMessage('Username not found.');
         return;
       }
 
-      // 🧩 Case 1: Existing user → attempt login
-      if (existingUser) {
-        const passwordMatch = await bcrypt.compare(
-          password,
-          existingUser.password
-        );
-        if (passwordMatch) {
-          localStorage.setItem('username', username);
-          setMessage('Logged in successfully!');
-        } else {
-          setMessage('Incorrect password.');
-        }
+      // 2️⃣ Compare passwords
+      const passwordMatch = await bcrypt.compare(password, user.password_hash);
+      if (!passwordMatch) {
+        setMessage('Incorrect password.');
         return;
       }
 
-      // 🧩 Case 2: New user → register
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const { error: insertError } = await supabase
-        .from('profiles')
-        .insert([{ username, password: hashedPassword }]);
+      // 3️⃣ Store session locally
+      localStorage.setItem('username', user.username);
 
-      if (insertError) {
-        console.error(insertError);
-        setMessage('Error creating user: ' + insertError.message);
-      } else {
-        localStorage.setItem('username', username);
-        setMessage('Account created successfully!');
+      const uid = user.uid;
+
+      // 4️⃣ Check if user is a teacher
+      const { data: teacher, error: teacherError } = await supabase
+        .from('teachers')
+        .select('uid')
+        .eq('uid', uid)
+        .single();
+
+      if (teacher && !teacherError) {
+        router.push('/teacherHome');
+        return;
       }
+
+      // 5️⃣ Check if student
+      const { data: student, error: studentError } = await supabase
+        .from('students')
+        .select('uid')
+        .eq('uid', uid)
+        .single();
+
+      if (student && !studentError) {
+        router.push('/');
+        return;
+      }
+
+      // 6️⃣ If neither, user exists but not assigned (should not happen)
+      setMessage('Account exists, but no role assigned.');
+
     } catch (err) {
       console.error(err);
-      setMessage('Something went wrong.');
+      setMessage('Unexpected error.');
     }
   };
 
   return (
     <main className="flex flex-col items-center justify-center min-h-screen p-6">
-      <h1 className="text-3xl font-bold mb-6">Login / Register</h1>
+      <h1 className="text-3xl font-bold mb-6">Login</h1>
 
       <form
         onSubmit={handleSubmit}
@@ -81,6 +96,7 @@ export default function LoginPage() {
           onChange={(e) => setUsername(e.target.value)}
           className="border p-2 rounded-md"
         />
+
         <input
           type="password"
           placeholder="Password"
@@ -88,22 +104,19 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           className="border p-2 rounded-md"
         />
+
         <button
           type="submit"
           className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-md"
         >
-          Login / Register
+          Login
         </button>
       </form>
 
-      {message && (
-        <p className="mt-4 text-lg text-center">{message}</p>
-      )}
+      {message && <p className="mt-4 text-lg text-center">{message}</p>}
 
-      <Link href="/" className="text-blue-500 hover:underline mt-6">
-        Back to Home
-        <br />
-        <br />
+      <Link href="/signup" className="text-blue-500 hover:underline mt-6">
+        Don’t have an account? Sign up
       </Link>
     </main>
   );
