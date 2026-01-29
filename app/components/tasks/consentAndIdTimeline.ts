@@ -24,7 +24,7 @@ export function buildConsentAndIdTimeline(options: BuildOptions = {}) {
     padding: 12px 16px;
     margin: 8px;
     cursor: pointer;
-    background: #fff;
+    background: #ffffff;
     color: #111;
   }
   .consent-btn:hover { transform: rotate(-1deg) scale(1.02); }
@@ -47,6 +47,7 @@ export function buildConsentAndIdTimeline(options: BuildOptions = {}) {
 
   /* Extra safety for endExperiment screens */
   .consent-end, .consent-end * { color: #111 !important; }
+  
 </style>
 `;
 
@@ -129,6 +130,8 @@ export function buildConsentAndIdTimeline(options: BuildOptions = {}) {
     },
   });
 
+
+
   // 2) Participant ID entry ONLY if agreed
   timeline.push({
     type: HtmlSurveyTextPlugin,
@@ -155,9 +158,18 @@ export function buildConsentAndIdTimeline(options: BuildOptions = {}) {
     data: { task: "id_entry" },
     conditional_function: () => (window as any).__consentDecision === "agree",
     on_finish: (data: any) => {
-      const raw = data.response?.participant_id ?? "";
-      data.participant_id = String(raw).trim();
-    },
+  const raw = data.response?.participant_id ?? "";
+  const pid = String(raw).trim();
+  data.participant_id = pid;
+
+  // ✅ make it available to the router trial
+  (window as any).__participantId = pid;
+
+  // optional: attach to jsPsych-wide properties
+  const jsPsych = (window as any).jsPsych;
+  if (jsPsych?.data?.addProperties) jsPsych.data.addProperties({ participant_id: pid });
+},
+
   });
 
   return timeline;

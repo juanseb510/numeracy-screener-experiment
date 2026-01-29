@@ -1,6 +1,7 @@
 // app/components/tasks/numberLineEstimationTimeline.ts
 
 import HtmlSliderResponsePlugin from "@jspsych/plugin-html-slider-response";
+import HtmlButtonResponsePlugin from "@jspsych/plugin-html-button-response";
 import { renderValueHTML } from "@/app/components/renderValue";
 
 // Protocol metrics:
@@ -20,43 +21,84 @@ type EstimationTrial = {
 type BuildOptions = {
   trials: EstimationTrial[];
   promptTitle?: string;
+
+  // NEW: tag trials as "pre" | "post" | "monster" (or any string you want)
+  phase?: string;
+
+  // NEW: optionally hide the intro screen (useful when chaining many sections)
+  showIntro?: boolean;
 };
 
+// Forces endpoint labels to be visible (you mentioned they were white on your build)
+const endpointLabelCSS = `
+  <style>
+    .jspsych-html-slider-response-container,
+    .jspsych-html-slider-response-stimulus {
+      color: #111 !important;
+    }
+
+    .jspsych-slider-labels {
+      color: #111 !important;
+      font-weight: 900 !important;
+      font-family: "Courier New", monospace !important;
+      font-size: 16px !important;
+      margin-top: 10px !important;
+      letter-spacing: 0.5px !important;
+    }
+
+    .jspsych-slider-labels span {
+      color: #111 !important;
+      opacity: 1 !important;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.55) !important;
+    }
+
+    .jspsych-content {
+      color: #111 !important;
+    }
+
+    /* Make the slider track area feel consistent on mobile/tablet */
+    input[type="range"] {
+      width: min(520px, 100%) !important;
+      max-width: 520px !important;
+    }
+  </style>
+`;
+
 export function buildNumberLineEstimationTimeline(options: BuildOptions) {
-  const { trials, promptTitle } = options;
+  const { trials, promptTitle, phase = "number_line_estimation", showIntro = true } =
+    options;
 
   const title = promptTitle ?? "NUMBER LINE ESTIMATION";
   const timeline: any[] = [];
 
-  // Simple "task start" screen
-  timeline.push({
-    type: HtmlSliderResponsePlugin,
-    stimulus: `
-      <div style="max-width: 900px; margin: 0 auto; padding: 30px; text-align:center;">
-        <h2 style="font-size: 40px; font-weight: 900; color: #16a34a; margin-bottom: 10px; font-family: 'Courier New', monospace;">
-          ${title}
-        </h2>
-        <p style="font-size: 18px; color: #111; margin-bottom: 18px;">
-          Move the slider to place the value on a 0–1 number line.
-        </p>
-        <p style="font-size: 16px; color: #333;">
-          Click <strong>Submit</strong> to continue.
-        </p>
-      </div>
-    `,
-    labels: ["0", "0.5", "1"],
-    min: 0,
-    max: 100,
-    start: 50,
-    require_movement: false,
-    button_label: "START",
-    data: { task: "estimation_intro" },
-  });
+  // Intro screen (BUTTON instead of slider for better UX)
+  if (showIntro) {
+    timeline.push({
+      type: HtmlButtonResponsePlugin,
+      stimulus: `
+        ${endpointLabelCSS}
+        <div style="max-width: 900px; margin: 0 auto; padding: 30px; text-align:center;">
+          <h2 style="font-size: 40px; font-weight: 900; color: #16a34a; margin-bottom: 10px; font-family: 'Courier New', monospace;">
+            ${title}
+          </h2>
+          <p style="font-size: 18px; color: #111; margin-bottom: 18px;">
+            Place the value on a 0–1 number line.
+          </p>
+          <p style="font-size: 16px; color: #333;">
+            Tap <strong>START</strong> to begin.
+          </p>
+        </div>
+      `,
+      choices: ["START"],
+      data: { task: "estimation_intro", phase },
+    });
+  }
 
   trials.forEach((t, idx) => {
     timeline.push({
       type: HtmlSliderResponsePlugin,
       stimulus: `
+        ${endpointLabelCSS}
         <div style="max-width: 900px; margin: 0 auto; padding: 20px; text-align:center;">
           <h2 style="font-size: 34px; font-weight: 900; color: #16a34a; margin-bottom: 18px; font-family: 'Courier New', monospace;">
             PLACE IT ON THE LINE
@@ -90,6 +132,8 @@ export function buildNumberLineEstimationTimeline(options: BuildOptions) {
       button_label: "SUBMIT",
       data: {
         task: "number_line_estimation",
+        phase,
+
         trial_id: t.id,
         stimulus: t.stimulus,
         notation: t.notation,
@@ -100,7 +144,6 @@ export function buildNumberLineEstimationTimeline(options: BuildOptions) {
       on_finish: (data: any) => {
         // Slider response is 0..100
         const estimate01 = Number(data.response) / 100;
-
         const true01 = Number(data.true_value_01);
 
         // PAE for 0–1 line (range length = 1)

@@ -51,8 +51,8 @@ export default function LoginPage() {
       const hashedPassword = await bcrypt.hash(password, 10);
       const { error: insertError } = await supabase
         .from('profiles')
-        .insert([{ username, password: hashedPassword }]);
 
+        .insert([{ username, password: hashedPassword }]);
       if (insertError) {
         console.error(insertError);
         setMessage('Error creating user: ' + insertError.message);
